@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>醒目仔尋回記 - AR爪印追蹤</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Camera feed */
+  #camera-feed {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    z-index: 0;
+  }
+
+  /* AR overlay canvas */
+  #ar-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* UI Layer */
+  .ui-layer {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 10;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .ui-layer > * { pointer-events: auto; }
+
+  /* Top bar */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+    padding-top: max(env(safe-area-inset-top, 12px), 12px);
+  }
+  .top-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .game-title {
+    color: #FFF5EB;
+    font-size: 16px;
+    font-weight: 900;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
+  .proximity-badge {
+    background: linear-gradient(135deg, #E8740C, #F5A623);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 20px;
+    animation: pulse 2s infinite;
+  }
+
+  /* Narrator overlay */
+  .narrator-overlay {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 20;
+    padding: 0 14px 24px;
+    background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.6) 70%, transparent 100%);
+    padding-bottom: max(env(safe-area-inset-bottom, 24px), 24px);
+  }
+  .narrator-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .narrator-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #C9A96E, #F5D780);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    flex-shrink: 0;
+    border: 2px solid #C9A96E;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  }
+  .narrator-bubble {
+    background: rgba(255,253,249,0.95);
+    border-radius: 18px;
+    border-top-left-radius: 4px;
+    padding: 14px 18px;
+    flex: 1;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+  }
+  .narrator-text {
+    font-size: 19px;
+    line-height: 1.7;
+    color: #3A3226;
+    font-weight: 500;
+  }
+  .action-btn {
+    width: 100%;
+    padding: 16px;
+    font-size: 20px;
+    font-weight: 900;
+    color: #fff;
+    background: linear-gradient(135deg, #E8740C, #F5A623);
+    border: none;
+    border-radius: 14px;
+    cursor: pointer;
+    font-family: 'Noto Sans TC', sans-serif;
+    letter-spacing: 1px;
+    box-shadow: 0 4px 16px rgba(232,116,12,0.4);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .action-btn:active { transform: scale(0.97); }
+  .action-btn.secondary {
+    background: rgba(255,255,255,0.15);
+    border: 2px solid rgba(255,255,255,0.4);
+    box-shadow: none;
+  }
+
+  /* AR Scan frame */
+  .scan-frame {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 260px;
+    height: 260px;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .scan-corner {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    border-color: #F5A623;
+    border-style: solid;
+    border-width: 0;
+  }
+  .scan-corner.tl { top: 0; left: 0; border-top-width: 4px; border-left-width: 4px; border-radius: 8px 0 0 0; }
+  .scan-corner.tr { top: 0; right: 0; border-top-width: 4px; border-right-width: 4px; border-radius: 0 8px 0 0; }
+  .scan-corner.bl { bottom: 0; left: 0; border-bottom-width: 4px; border-left-width: 4px; border-radius: 0 0 0 8px; }
+  .scan-corner.br { bottom: 0; right: 0; border-bottom-width: 4px; border-right-width: 4px; border-radius: 0 0 8px 0; }
+  .scan-line {
+    position: absolute;
+    left: 10%;
+    width: 80%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #F5A623, transparent);
+    animation: scanMove 2.5s ease-in-out infinite;
+    box-shadow: 0 0 12px #F5A623;
+  }
+
+  /* Paw discovery popup */
+  .paw-discovery {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 30;
+    background: rgba(0,0,0,0.85);
+    border-radius: 24px;
+    padding: 32px 28px;
+    text-align: center;
+    border: 2px solid #C9A96E;
+    width: 85%;
+    max-width: 340px;
+    animation: popIn 0.4s ease;
+  }
+  .paw-discovery h2 {
+    font-size: 24px;
+    color: #FFF5EB;
+    margin: 12px 0 8px;
+    font-weight: 900;
+  }
+  .paw-discovery p {
+    font-size: 17px;
+    color: #C9BDA8;
+    line-height: 1.6;
+    margin-bottom: 20px;
+  }
+
+  /* Compass indicator */
+  .compass {
+    position: fixed;
+    top: 80px;
+    right: 16px;
+    z-index: 15;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.6);
+    border: 2px solid rgba(255,255,255,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+  .compass-arrow {
+    font-size: 24px;
+    animation: float 1.5s ease-in-out infinite;
+  }
+  .compass-dist {
+    font-size: 11px;
+    color: #F5A623;
+    font-weight: 700;
+    margin-top: -2px;
+  }
+
+  /* Distance bar */
+  .distance-bar {
+    position: fixed;
+    top: 70px;
+    left: 16px;
+    right: 84px;
+    z-index: 15;
+    background: rgba(0,0,0,0.6);
+    border-radius: 12px;
+    padding: 10px 14px;
+    backdrop-filter: blur(4px);
+  }
+  .distance-label {
+    font-size: 13px;
+    color: #C9BDA8;
+    margin-bottom: 6px;
+  }
+  .distance-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.15);
+    overflow: hidden;
+  }
+  .distance-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #E8740C, #F5A623);
+    transition: width 0.8s ease;
+  }
+
+  /* Dog sighting flash */
+  .dog-sighting {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.4);
+    animation: flashIn 0.3s ease;
+  }
+  .dog-sprite {
+    font-size: 80px;
+    animation: dogRun 2s ease forwards;
+  }
+
+  /* SOS button */
+  .sos-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 16px;
+    z-index: 50;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: 3px solid #fff;
+    background: linear-gradient(135deg, #D32F2F, #F44336);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 900;
+    font-family: 'Noto Sans TC', sans-serif;
+    box-shadow: 0 4px 16px rgba(211,47,47,0.5);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Start screen */
+  .start-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: linear-gradient(180deg, #3A3226 0%, #5C4B32 50%, #8B7355 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 32px;
+    text-align: center;
+  }
+  .start-logo { font-size: 72px; animation: float 3s ease-in-out infinite; }
+  .start-title { font-size: 32px; font-weight: 900; color: #FFF5EB; letter-spacing: 2px; }
+  .start-sub { font-size: 20px; color: #C9A96E; font-weight: 500; line-height: 1.6; }
+  .start-chapter {
+    background: rgba(255,255,255,0.1);
+    border: 2px solid #C9A96E;
+    border-radius: 16px;
+    padding: 18px 24px;
+    margin-top: 8px;
+  }
+  .start-chapter h3 { font-size: 22px; color: #F5D780; font-weight: 900; }
+  .start-chapter p { font-size: 16px; color: #C9BDA8; margin-top: 6px; line-height: 1.5; }
+
+  /* Permissions screen */
+  .permission-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: linear-gradient(180deg, #3A3226, #5C4B32);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 32px;
+    text-align: center;
+  }
+  .perm-icon { font-size: 56px; }
+  .perm-title { font-size: 24px; font-weight: 900; color: #FFF5EB; }
+  .perm-desc { font-size: 18px; color: #C9BDA8; line-height: 1.7; }
+
+  /* Task overlay */
+  .task-overlay {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 20;
+    background: rgba(255, 253, 249, 0.97);
+    border-radius: 24px 24px 0 0;
+    padding: 24px 20px;
+    padding-bottom: max(env(safe-area-inset-bottom, 24px), 24px);
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.2);
+    max-height: 55vh;
+    overflow-y: auto;
+    animation: slideUp 0.4s ease;
+  }
+  .task-badge {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 700;
+    color: #E8740C;
+    background: #FFF5EB;
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1.5px solid #F5C882;
+    margin-bottom: 8px;
+  }
+  .task-title {
+    font-size: 24px;
+    font-weight: 900;
+    color: #3A3226;
+    margin-bottom: 8px;
+  }
+  .task-desc {
+    font-size: 18px;
+    color: #5C4B32;
+    line-height: 1.7;
+    margin-bottom: 16px;
+  }
+  .choice-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .choice-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 16px 10px;
+    border-radius: 14px;
+    border: 2.5px solid #D5CFC4;
+    background: #FFFDF9;
+    cursor: pointer;
+    font-family: 'Noto Sans TC', sans-serif;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .choice-btn.selected {
+    border-color: #E8740C;
+    background: #FFF5EB;
+    transform: scale(1.03);
+  }
+  .choice-emoji { font-size: 28px; }
+  .choice-text { font-size: 16px; font-weight: 700; color: #3A3226; text-align: center; }
+
+  /* Memory album */
+  .memory-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    gap: 18px;
+    animation: fadeIn 0.5s ease;
+  }
+  .memory-card {
+    width: 100%;
+    max-width: 340px;
+    border-radius: 20px;
+    overflow: hidden;
+    border: 2px solid #C9A96E;
+  }
+  .memory-visual {
+    height: 150px;
+    background: linear-gradient(135deg, #3A3226, #5C4B32);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .memory-visual::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 18px, rgba(201,169,110,0.12) 18px, rgba(201,169,110,0.12) 20px);
+  }
+  .memory-text-area {
+    background: #FFFDF9;
+    padding: 20px;
+  }
+  .memory-headline { font-size: 20px; font-weight: 900; color: #5C4B32; margin-bottom: 8px; }
+  .memory-body { font-size: 16px; line-height: 1.7; color: #5C4B32; }
+  .memory-quote { font-size: 18px; font-weight: 700; color: #C9A96E; margin-top: 12px; font-style: italic; line-height: 1.5; }
+
+  /* Animations */
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes scanMove { 0% { top: 10%; } 50% { top: 85%; } 100% { top: 10%; } }
+  @keyframes popIn { 0% { transform: translate(-50%,-50%) scale(0.7); opacity: 0; } 100% { transform: translate(-50%,-50%) scale(1); opacity: 1; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  @keyframes flashIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes dogRun {
+    0% { transform: translateX(-100px) scaleX(-1); opacity: 1; }
+    70% { transform: translateX(80px) scaleX(-1); opacity: 1; }
+    100% { transform: translateX(200px) scaleX(-1); opacity: 0; }
+  }
+  @keyframes pawStamp {
+    0% { transform: scale(0) rotate(-20deg); opacity: 0; }
+    50% { transform: scale(1.3) rotate(0deg); opacity: 1; }
+    100% { transform: scale(1) rotate(0deg); opacity: 0.9; }
+  }
+  @keyframes glowPulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(245,166,35,0.3); }
+    50% { box-shadow: 0 0 40px rgba(245,166,35,0.6); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Camera feed -->
+<video id="camera-feed" autoplay playsinline></video>
+
+<!-- AR Canvas for paw prints -->
+<canvas id="ar-canvas"></canvas>
+
+<!-- ====== START SCREEN ====== -->
+<div class="start-screen" id="startScreen">
+  <div class="start-logo">🐾</div>
+  <div class="start-title">醒目仔尋回記</div>
+  <div class="start-sub">AR實境尋狗冒險</div>
+  <div class="start-chapter">
+    <h3>🚈 第二章：輕鐵站的線索</h3>
+    <p>醒目仔跑去咗輕鐵站！<br>跟住佢嘅爪印，搵出無障礙問題！</p>
+  </div>
+  <button class="action-btn" style="margin-top: 12px; max-width: 300px;" onclick="requestCamera()">
+    📷 開啟AR相機
+  </button>
+</div>
+
+<!-- ====== PERMISSION SCREEN ====== -->
+<div class="permission-screen" id="permScreen" style="display:none;">
+  <div class="perm-icon">📷</div>
+  <div class="perm-title">需要相機權限</div>
+  <div class="perm-desc">
+    請允許使用相機，<br>
+    先至可以睇到AR爪印！<br><br>
+    你嘅相機畫面唔會被儲存。
+  </div>
+  <button class="action-btn" style="max-width: 280px;" onclick="requestCamera()">允許並繼續</button>
+</div>
+
+<!-- ====== SOS BUTTON ====== -->
+<button class="sos-btn" id="sosBtn" style="display:none;" onclick="alert('已撥打緊急聯絡人 📞')">SOS</button>
+
+<script>
+// ============================================
+// GAME STATE
+// ============================================
+const STATE = {
+  phase: 'start', // start, scanning, paw_trail, dog_sighting, task, memory, complete
+  pawPrints: [],
+  pawIndex: 0,
+  taskStep: 0,
+  answers: {},
+  distanceProgress: 0,
+  gyro: { alpha: 0, beta: 0, gamma: 0 },
+  cameraReady: false,
+};
+
+const canvas = document.getElementById('ar-canvas');
+const ctx = canvas.getContext('2d');
+let animFrame;
+
+// ============================================
+// CAMERA SETUP
+// ============================================
+async function requestCamera() {
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('permScreen').style.display = 'none';
+  
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const video = document.getElementById('camera-feed');
+    video.srcObject = stream;
+    await video.play();
+    STATE.cameraReady = true;
+    
+    // Setup canvas
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    // Start gyro
+    setupGyroscope();
+    
+    // Show SOS
+    document.getElementById('sosBtn').style.display = 'block';
+    
+    // Start scanning phase
+    startScanning();
+    
+  } catch (err) {
+    document.getElementById('permScreen').style.display = 'flex';
+  }
+}
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+
+// ============================================
+// GYROSCOPE
+// ============================================
+function setupGyroscope() {
+  if (typeof DeviceOrientationEvent !== 'undefined' && 
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().then(response => {
+      if (response === 'granted') {
+        window.addEventListener('deviceorientation', handleGyro);
+      }
+    }).catch(() => {});
+  } else {
+    window.addEventListener('deviceorientation', handleGyro);
+  }
+}
+
+function handleGyro(e) {
+  STATE.gyro.alpha = e.alpha || 0;
+  STATE.gyro.beta = e.beta || 0;   // front-back tilt
+  STATE.gyro.gamma = e.gamma || 0; // left-right tilt
+}
+
+// ============================================
+// SCANNING PHASE
+// ============================================
+function startScanning() {
+  STATE.phase = 'scanning';
+  
+  // Show scanning UI
+  const uiHTML = `
+    <div class="ui-layer" id="scanUI">
+      <div class="top-bar">
+        <div class="top-bar-left">
+          <span style="font-size:20px">🐾</span>
+          <span class="game-title">醒目仔尋回記</span>
+        </div>
+        <span class="proximity-badge">🔍 掃描中...</span>
+      </div>
+      <div></div>
+    </div>
+    <div class="scan-frame" id="scanFrame">
+      <div class="scan-corner tl"></div>
+      <div class="scan-corner tr"></div>
+      <div class="scan-corner bl"></div>
+      <div class="scan-corner br"></div>
+      <div class="scan-line"></div>
+    </div>
+    <div class="narrator-overlay" id="scanNarrator">
+      <div class="narrator-box">
+        <div class="narrator-avatar">👵</div>
+        <div class="narrator-bubble">
+          <div class="narrator-text" id="scanText"></div>
+        </div>
+      </div>
+      <button class="action-btn" id="scanBtn" style="display:none;" onclick="startPawTrail()">
+        跟住爪印走！🐾
+      </button>
+    </div>
+  `;
+  
+  const overlay = document.createElement('div');
+  overlay.id = 'scanOverlay';
+  overlay.innerHTML = uiHTML;
+  document.body.appendChild(overlay);
+  
+  // Typewriter narration
+  typeWriter('scanText', '醒目仔跑去咗輕鐵站！我急急腳追過去......等等，地下好似有爪印！用手機對住地面睇吓！', () => {
+    // After narration, simulate "detection"
+    setTimeout(() => {
+      document.getElementById('scanFrame').style.display = 'none';
+      document.querySelector('.proximity-badge').textContent = '✅ 發現爪印！';
+      document.querySelector('.proximity-badge').style.background = 'linear-gradient(135deg, #2E7D32, #4CAF50)';
+      document.getElementById('scanBtn').style.display = 'block';
+      // Start rendering paw prints
+      generatePawPrints();
+      startARRender();
+    }, 2500);
+  });
+}
+
+// ============================================
+// PAW PRINT GENERATION & AR RENDERING
+// ============================================
+function generatePawPrints() {
+  const w = canvas.width;
+  const h = canvas.height;
+  
+  // Create paw prints path from bottom-center going upward (as if on the ground ahead)
+  STATE.pawPrints = [];
+  const numPrints = 8;
+  
+  for (let i = 0; i < numPrints; i++) {
+    const t = i / (numPrints - 1);
+    // Perspective: bottom prints are larger and wider apart, top prints smaller and closer
+    const y = h * (0.85 - t * 0.45); // from 85% to 40% of screen
+    const xWobble = Math.sin(i * 1.2) * (50 - t * 30); // wobble decreases with distance
+    const x = w * 0.5 + xWobble;
+    const size = 55 - t * 25; // perspective size decrease
+    const opacity = 1 - t * 0.4;
+    const rotation = (i % 2 === 0 ? -15 : 15) + Math.random() * 10 - 5;
+    
+    STATE.pawPrints.push({
+      x, y, size, opacity, rotation,
+      revealed: false,
+      revealTime: 0,
+      glowPhase: Math.random() * Math.PI * 2,
+    });
+  }
+}
+
+function startARRender() {
+  cancelAnimationFrame(animFrame);
+  
+  let lastReveal = 0;
+  const REVEAL_INTERVAL = 600; // ms between each paw reveal
+  let startTime = Date.now();
+  
+  function render() {
+    const now = Date.now();
+    const elapsed = now - startTime;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Reveal paw prints one by one
+    if (STATE.pawIndex < STATE.pawPrints.length && now - lastReveal > REVEAL_INTERVAL) {
+      STATE.pawPrints[STATE.pawIndex].revealed = true;
+      STATE.pawPrints[STATE.pawIndex].revealTime = now;
+      STATE.pawIndex++;
+      lastReveal = now;
+    }
+    
+    // Gyro offset for AR feel
+    const gyroOffsetX = (STATE.gyro.gamma || 0) * 1.5;
+    const gyroOffsetY = (STATE.gyro.beta || 0) * 0.8 - 30;
+    
+    // Draw each revealed paw print
+    STATE.pawPrints.forEach((paw, i) => {
+      if (!paw.revealed) return;
+      
+      const timeSinceReveal = now - paw.revealTime;
+      const appearScale = Math.min(timeSinceReveal / 300, 1);
+      const bounceScale = timeSinceReveal < 300 ? 
+        1 + 0.3 * Math.sin(timeSinceReveal / 300 * Math.PI) : 1;
+      
+      // Glow animation
+      const glow = 0.3 + 0.2 * Math.sin(elapsed / 800 + paw.glowPhase);
+      
+      const finalScale = appearScale * bounceScale;
+      const px = paw.x + gyroOffsetX * (1 - i / STATE.pawPrints.length);
+      const py = paw.y + gyroOffsetY * (1 - i / STATE.pawPrints.length) * 0.5;
+      
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(paw.rotation * Math.PI / 180);
+      ctx.scale(finalScale, finalScale);
+      
+      // Glow effect
+      ctx.shadowColor = 'rgba(245, 166, 35, ' + glow + ')';
+      ctx.shadowBlur = 25;
+      
+      // Draw paw print shape
+      drawPawPrint(ctx, 0, 0, paw.size, paw.opacity);
+      
+      ctx.restore();
+    });
+    
+    // Draw directional arrow at the end of trail
+    if (STATE.pawIndex >= STATE.pawPrints.length && STATE.phase === 'paw_trail') {
+      const lastPaw = STATE.pawPrints[STATE.pawPrints.length - 1];
+      const arrowY = lastPaw.y - 50 + Math.sin(elapsed / 500) * 10;
+      const arrowX = lastPaw.x + gyroOffsetX * 0.3;
+      
+      ctx.save();
+      ctx.translate(arrowX, arrowY);
+      ctx.font = '36px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('📍', 0, 0);
+      ctx.restore();
+    }
+    
+    animFrame = requestAnimationFrame(render);
+  }
+  
+  render();
+}
+
+function drawPawPrint(ctx, x, y, size, opacity) {
+  const s = size / 50;
+  ctx.globalAlpha = opacity;
+  
+  // Main pad (ellipse)
+  ctx.fillStyle = '#E8740C';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 8 * s, 14 * s, 10 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Toe beans (4 small circles)
+  const toes = [
+    { dx: -12 * s, dy: -8 * s, r: 6 * s },
+    { dx: -4 * s, dy: -14 * s, r: 6.5 * s },
+    { dx: 5 * s, dy: -14 * s, r: 6.5 * s },
+    { dx: 13 * s, dy: -8 * s, r: 6 * s },
+  ];
+  
+  toes.forEach(toe => {
+    ctx.beginPath();
+    ctx.arc(x + toe.dx, y + toe.dy, toe.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  
+  // Inner pad highlight
+  ctx.fillStyle = 'rgba(245, 200, 130, 0.3)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 6 * s, 8 * s, 5 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.globalAlpha = 1;
+}
+
+// ============================================
+// PAW TRAIL PHASE
+// ============================================
+function startPawTrail() {
+  STATE.phase = 'paw_trail';
+  
+  // Remove scan overlay
+  const scanOverlay = document.getElementById('scanOverlay');
+  if (scanOverlay) scanOverlay.remove();
+  
+  // Show distance bar + compass
+  const trailUI = document.createElement('div');
+  trailUI.id = 'trailUI';
+  trailUI.innerHTML = `
+    <div class="top-bar" style="position:fixed;top:0;left:0;right:0;z-index:15;">
+      <div class="top-bar-left">
+        <span style="font-size:20px">🐾</span>
+        <span class="game-title">醒目仔尋回記</span>
+      </div>
+      <span class="proximity-badge" id="proxBadge">🐾 追蹤中...</span>
+    </div>
+    <div class="distance-bar">
+      <div class="distance-label">距離下一個線索：<span id="distText">約 80 米</span></div>
+      <div class="distance-track">
+        <div class="distance-fill" id="distFill" style="width: 15%"></div>
+      </div>
+    </div>
+    <div class="compass" id="compass">
+      <div class="compass-arrow">⬆️</div>
+      <div class="compass-dist">80m</div>
+    </div>
+  `;
+  document.body.appendChild(trailUI);
+  
+  // Simulate getting closer
+  simulateApproach();
+}
+
+function simulateApproach() {
+  let progress = 15;
+  const distances = [80, 65, 50, 35, 20, 10, 5];
+  let step = 0;
+  
+  const interval = setInterval(() => {
+    progress += 12 + Math.random() * 5;
+    step++;
+    
+    if (progress >= 100 || step >= distances.length) {
+      clearInterval(interval);
+      progress = 100;
+      
+      document.getElementById('distFill').style.width = '100%';
+      document.getElementById('distText').textContent = '到達！';
+      document.getElementById('proxBadge').textContent = '✅ 到達任務點！';
+      document.getElementById('proxBadge').style.background = 'linear-gradient(135deg, #2E7D32, #4CAF50)';
+      document.querySelector('.compass-dist').textContent = '0m';
+      
+      // Show dog sighting!
+      setTimeout(() => showDogSighting(), 800);
+      return;
+    }
+    
+    const dist = distances[Math.min(step, distances.length - 1)];
+    document.getElementById('distFill').style.width = progress + '%';
+    document.getElementById('distText').textContent = `約 ${dist} 米`;
+    document.querySelector('.compass-dist').textContent = `${dist}m`;
+    
+  }, 2000);
+}
+
+// ============================================
+// DOG SIGHTING (驚鴻一瞥)
+// ============================================
+function showDogSighting() {
+  STATE.phase = 'dog_sighting';
+  
+  const sighting = document.createElement('div');
+  sighting.className = 'dog-sighting';
+  sighting.id = 'dogSighting';
+  sighting.innerHTML = `<div class="dog-sprite">🐕</div>`;
+  document.body.appendChild(sighting);
+  
+  // Dog runs across screen then disappears
+  setTimeout(() => {
+    sighting.remove();
+    showPawDiscovery();
+  }, 2200);
+}
+
+function showPawDiscovery() {
+  const popup = document.createElement('div');
+  popup.className = 'paw-discovery';
+  popup.id = 'pawDiscovery';
+  popup.innerHTML = `
+    <div style="font-size:56px">🐾</div>
+    <h2>發現醒目仔嘅蹤跡！</h2>
+    <p>醒目仔啱啱跑過呢度！<br>佢喺月台附近留低咗線索......<br>幫好姨檢查下輕鐵站嘅設施！</p>
+    <button class="action-btn" onclick="startTask()">開始任務 🔍</button>
+  `;
+  document.body.appendChild(popup);
+}
+
+// ============================================
+// TASK PHASE
+// ============================================
+const TASKS = [
+  {
+    badge: '任務 1/3',
+    title: '搵出升降機位置',
+    desc: '陳伯坐輪椅需要搭升降機。你覺得月台嘅升降機容唔容易搵到？',
+    choices: [
+      { emoji: '😊', text: '好容易搵到', value: 'easy' },
+      { emoji: '🤔', text: '要搵一陣', value: 'medium' },
+      { emoji: '😰', text: '好難搵到', value: 'hard' },
+      { emoji: '❌', text: '搵唔到/壞咗', value: 'none' },
+    ],
+    key: 'elevator',
+  },
+  {
+    badge: '任務 2/3',
+    title: '月台座位評估',
+    desc: '等車嗰陣有冇位坐？你覺得月台嘅座位夠唔夠？',
+    choices: [
+      { emoji: '✅', text: '座位充足', value: 'enough' },
+      { emoji: '⚠️', text: '座位唔夠', value: 'not_enough' },
+      { emoji: '❌', text: '完全冇座位', value: 'none' },
+      { emoji: '♿', text: '冇無障礙座位', value: 'no_accessible' },
+    ],
+    key: 'seating',
+  },
+  {
+    badge: '任務 3/3',
+    title: '廣播清晰度',
+    desc: '月台廣播講乜你聽唔聽得清楚？',
+    choices: [
+      { emoji: '🔊', text: '好清楚', value: 'clear' },
+      { emoji: '🔉', text: '聽到但唔太清', value: 'ok' },
+      { emoji: '🔇', text: '聽唔清楚', value: 'unclear' },
+      { emoji: '❓', text: '冇廣播', value: 'none' },
+    ],
+    key: 'broadcast',
+  },
+];
+
+function startTask() {
+  STATE.phase = 'task';
+  STATE.taskStep = 0;
+  
+  // Clean up previous UI
+  const pawDiscovery = document.getElementById('pawDiscovery');
+  if (pawDiscovery) pawDiscovery.remove();
+  const trailUI = document.getElementById('trailUI');
+  if (trailUI) trailUI.remove();
+  
+  showTask(0);
+}
+
+function showTask(index) {
+  STATE.taskStep = index;
+  const task = TASKS[index];
+  
+  // Remove previous task overlay
+  const prev = document.getElementById('taskOverlay');
+  if (prev) prev.remove();
+  
+  const overlay = document.createElement('div');
+  overlay.className = 'task-overlay';
+  overlay.id = 'taskOverlay';
+  
+  let choicesHTML = task.choices.map((c, i) => `
+    <button class="choice-btn" id="choice_${i}" onclick="selectChoice(${index}, ${i}, '${c.value}')">
+      <span class="choice-emoji">${c.emoji}</span>
+      <span class="choice-text">${c.text}</span>
+    </button>
+  `).join('');
+  
+  overlay.innerHTML = `
+    <span class="task-badge">${task.badge}</span>
+    <div class="task-title">${task.title}</div>
+    <div class="task-desc">${task.desc}</div>
+    <div class="choice-grid">${choicesHTML}</div>
+    <button class="action-btn" id="taskNextBtn" style="display:none;" onclick="nextTask()">
+      ${index < TASKS.length - 1 ? '下一題 →' : '提交評估 ✓'}
+    </button>
+  `;
+  
+  document.body.appendChild(overlay);
+}
+
+function selectChoice(taskIndex, choiceIndex, value) {
+  const task = TASKS[taskIndex];
+  STATE.answers[task.key] = value;
+  
+  // Update UI
+  task.choices.forEach((_, i) => {
+    const btn = document.getElementById(`choice_${i}`);
+    btn.className = i === choiceIndex ? 'choice-btn selected' : 'choice-btn';
+  });
+  
+  document.getElementById('taskNextBtn').style.display = 'block';
+}
+
+function nextTask() {
+  if (STATE.taskStep < TASKS.length - 1) {
+    showTask(STATE.taskStep + 1);
+  } else {
+    showTaskComplete();
+  }
+}
+
+// ============================================
+// TASK COMPLETE
+// ============================================
+function showTaskComplete() {
+  const prev = document.getElementById('taskOverlay');
+  if (prev) prev.remove();
+  
+  // Stop AR rendering
+  cancelAnimationFrame(animFrame);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  const overlay = document.createElement('div');
+  overlay.className = 'narrator-overlay';
+  overlay.style.paddingTop = '32px';
+  overlay.id = 'completeOverlay';
+  overlay.innerHTML = `
+    <div style="text-align:center; margin-bottom:16px;">
+      <span style="font-size:64px;">🎉</span>
+      <div style="font-size:24px; font-weight:900; color:#FFF5EB; margin-top:8px;">任務完成！</div>
+    </div>
+    <div class="narrator-box">
+      <div class="narrator-avatar">👵</div>
+      <div class="narrator-bubble">
+        <div class="narrator-text">多謝你幫忙！你發現嘅問題我哋都記低咗。醒目仔一定喺附近，我哋又近咗一步喇！</div>
+      </div>
+    </div>
+    <div style="background:rgba(255,255,255,0.1); border-radius:12px; padding:12px 16px; margin:12px 0; text-align:center;">
+      <div style="font-size:14px; color:#C9A96E; font-weight:700;">📊 已記錄社區數據</div>
+      <div style="font-size:13px; color:#9B917F; margin-top:4px;">升降機 · 座位 · 廣播 → 已上傳至社區熱點圖</div>
+    </div>
+    <button class="action-btn" onclick="showMemory()">查看記憶相冊 📖</button>
+  `;
+  document.body.appendChild(overlay);
+}
+
+// ============================================
+// MEMORY ALBUM
+// ============================================
+function showMemory() {
+  const prev = document.getElementById('completeOverlay');
+  if (prev) prev.remove();
+  
+  STATE.phase = 'memory';
+  
+  const overlay = document.createElement('div');
+  overlay.className = 'memory-overlay';
+  overlay.id = 'memoryOverlay';
+  overlay.innerHTML = `
+    <div style="font-size:22px; font-weight:900; color:#C9A96E;">記憶相冊 · 第2頁</div>
+    <div class="memory-card">
+      <div class="memory-visual">
+        <span style="font-size:56px; z-index:1; position:relative;">🚈</span>
+      </div>
+      <div class="memory-text-area">
+        <div class="memory-headline">屯門輕鐵通車的集體回憶</div>
+        <div class="memory-body">1988年，輕鐵剛通車。好姨帶住一家人第一次坐輕鐵，電話亭、舊式售票機......全部都係新嘅。</div>
+        <div class="memory-quote">「當年成條輕鐵都係新嘅，我哋都係新手。」</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; width:100%;">
+      <button class="action-btn" style="flex:1;" onclick="showFinalProgress()">繼續旅程</button>
+    </div>
+    <div style="text-align:center;">
+      <span style="font-size:13px; color:#7B6F63;">💧 記得飲水！附近屯門站有座位休息</span>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+// ============================================
+// FINAL PROGRESS
+// ============================================
+function showFinalProgress() {
+  const prev = document.getElementById('memoryOverlay');
+  if (prev) prev.remove();
+  
+  STATE.phase = 'complete';
+  
+  const overlay = document.createElement('div');
+  overlay.className = 'memory-overlay';
+  overlay.id = 'finalOverlay';
+  overlay.innerHTML = `
+    <span style="font-size:64px;">🐕</span>
+    <div style="font-size:24px; font-weight:900; color:#FFF5EB;">線索進度更新</div>
+    <div style="display:flex; gap:4px;">
+      ${[1,2,3,4,5].map(i => `<span style="font-size:28px; ${i > 2 ? 'filter:grayscale(1) opacity(0.3);' : ''}">\u2B50</span>`).join('')}
+    </div>
+    <div style="background:rgba(255,253,249,0.95); border-radius:18px; padding:20px; width:100%; max-width:320px; text-align:center; border:2px solid #C9A96E;">
+      <div style="font-size:22px; font-weight:900; color:#E8740C;">★★ 追蹤中</div>
+      <div style="font-size:17px; color:#5C4B32; margin-top:8px; line-height:1.5;">好姨發現醒目仔咬過嘅玩具，確認方向！</div>
+      <div style="width:100%; height:10px; border-radius:5px; background:#E8DFD0; margin-top:14px; overflow:hidden;">
+        <div style="width:25%; height:100%; border-radius:5px; background:linear-gradient(90deg,#E8740C,#F5A623);"></div>
+      </div>
+      <div style="font-size:14px; color:#9B917F; margin-top:8px;">已完成 2/8 範疇</div>
+    </div>
+    <div style="background:rgba(255,248,225,0.9); border-radius:14px; padding:16px; width:100%; max-width:320px; border:1.5px solid #F5D780;">
+      <div style="font-size:15px; font-weight:700; color:#5C4B32;">下一個線索</div>
+      <div style="font-size:14px; color:#7B6F63; margin-top:4px;">醒目仔跑進咗屋邨！好姨要去升降機大堂搵線索...</div>
+      <div style="font-size:13px; color:#C9A96E; margin-top:8px;">🔒 D3 住屋 · 即將開放</div>
+    </div>
+    <button class="action-btn" style="max-width:320px;" onclick="restartDemo()">重新體驗 Demo 🔄</button>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function restartDemo() {
+  // Cleanup everything
+  ['finalOverlay','trailUI','scanOverlay','dogSighting','pawDiscovery','taskOverlay','completeOverlay','memoryOverlay']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+  
+  cancelAnimationFrame(animFrame);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // Stop camera
+  const video = document.getElementById('camera-feed');
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+  
+  STATE.phase = 'start';
+  STATE.pawPrints = [];
+  STATE.pawIndex = 0;
+  STATE.taskStep = 0;
+  STATE.answers = {};
+  STATE.cameraReady = false;
+  
+  document.getElementById('sosBtn').style.display = 'none';
+  document.getElementById('startScreen').style.display = 'flex';
+}
+
+// ============================================
+// TYPEWRITER UTILITY
+// ============================================
+function typeWriter(elementId, text, callback) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  let i = 0;
+  el.textContent = '';
+  const interval = setInterval(() => {
+    i++;
+    if (i <= text.length) {
+      el.textContent = text.slice(0, i);
+    } else {
+      clearInterval(interval);
+      if (callback) setTimeout(callback, 400);
+    }
+  }, 55);
+}
+</script>
+
+</body>
+</html>
